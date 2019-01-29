@@ -6,11 +6,7 @@ import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, Locat
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.ojai.joda.DateTime;
-import com.mapr.db._
-import com.mapr.db.spark._
-import com.mapr.db.spark.impl._
 import com.mapr.db.spark.streaming._
-import com.mapr.db.spark.sql._
 
 
 object Application {
@@ -36,9 +32,7 @@ object Application {
       directStream.map(_.value())
       .map(toJsonWithId)
 
-    recordsDirectStream.print(3)
-
-    //recordsDirectStream.saveToMapRDB(argsConfiguration.tableName, false, false, "_id")
+    recordsDirectStream.saveToMapRDB(argsConfiguration.tableName)
 
     ssc.start()
     ssc.awaitTermination()
@@ -61,17 +55,21 @@ object Application {
       id,
       values(0),
       values(1),
-      "",
-      values(2).toInt,
-      values(3).toDouble,
-      values(4).toDouble,
-      values(5).toDouble,
-      values(6).toDouble,
-      values(7).toDouble,
-      values(8).toDouble,
-      values(10).toInt,
-      0,
-      ""
+      values(2),
+      values(3),
+      values(4),
+      values(5),
+      values(6),
+      values(7),
+      values(8),
+      values(9),
+      values(10),
+      values(11),
+      values(12),
+      values(13),
+      values(14),
+      values(15),
+      values(16)
     )
 
   }

@@ -2,20 +2,22 @@ package com.mpojeda84.mapr.scala
 
 case class CarDataInstant(
                            _id: String,
+
                            vin: String,
                            make: String,
-                           model: String,
-                           year: Int,
-
-                           latitude: Double,
-                           longitude: Double,
-                           speed: Double,
-                           instantFuelEconomy: Double,
-                           totalFuelEconomy: Double,
-                           fuelRate: Double,
-
-                           rpm: Int,
-                           odometer: Int,
-                           checkEngineMessage: String
-
+                           year: String,
+                           nhrTimeStamp: String,
+                           hrTimeStamp: String,
+                           latitude: String,
+                           longitude: String,
+                           speed: String,
+                           instantFuelEconomy: String,
+                           totalFuelEconomy: String,
+                           fuelRate: String,
+                           engineCoolant: String,
+                           rpm: String,
+                           altitude: String,
+                           throttle: String,
+                           timeSinceEngineStart: String,
+                           ambientAirTemperature: String
                          )
