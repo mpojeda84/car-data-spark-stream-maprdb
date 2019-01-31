@@ -31,7 +31,7 @@
 			<groupId>org.ojai</groupId>
 			<artifactId>ojai-scala</artifactId>
 			<version>3.0-mapr-1808</version>
-			<!--<scope>provided</scope>-->
+			<scope>provided</scope>
 		</dependency>
 
 		<dependency>

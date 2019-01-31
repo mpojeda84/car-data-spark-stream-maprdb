@@ -7,6 +7,10 @@ import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.ojai.joda.DateTime;
 import com.mapr.db.spark.streaming._
+import com.mapr.db.spark._
+import com.mapr.db.spark.dbclient.DBClient
+import com.mapr.db.spark.utils.LoggingTrait
+import com.mapr.db.spark.writers.OJAIValue
 
 
 object Application {
@@ -24,32 +28,33 @@ object Application {
     println(argsConfiguration.tableName)
     println(argsConfiguration.topic)
 
-
     val consumerStrategy = ConsumerStrategies.Subscribe[String, String](List(argsConfiguration.topic), kafkaParameters)
     val directStream = KafkaUtils.createDirectStream(ssc, LocationStrategies.PreferConsistent, consumerStrategy)
 
-    val recordsDirectStream: DStream[CarDataInstant] =
       directStream.map(_.value())
       .map(toJsonWithId)
-
-    recordsDirectStream.saveToMapRDB(argsConfiguration.tableName)
+      .foreachRDD { rdd =>
+        rdd.saveToMapRDB(argsConfiguration.tableName)
+      }
 
     ssc.start()
     ssc.awaitTermination()
+
   }
 
 
   private def kafkaParameters = Map(
-    ConsumerConfig.GROUP_ID_CONFIG -> "connected-car",
+    ConsumerConfig.GROUP_ID_CONFIG -> ("connected-car" + DateTime.now().toString),
     ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
     ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
-    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG -> "true"
+    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG -> "true",
+    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> "earliest"
   )
 
   private def toJsonWithId(csvLine: String): CarDataInstant = {
     val values = csvLine.split(",").map(_.trim)
 
-    val id = values(0) + DateTime.now().toString();
+    val id = values(0) + values(4) + values(5);
 
     CarDataInstant(
       id,

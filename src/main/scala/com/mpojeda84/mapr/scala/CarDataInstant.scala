@@ -4,7 +4,8 @@ case class CarDataInstant(
                            _id: String,
 
                            vin: String,
-                           make: String,
+                           make: String
+                           ,
                            year: String,
                            nhrTimeStamp: String,
                            hrTimeStamp: String,
