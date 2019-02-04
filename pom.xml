@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.mpojeda84.mapr</groupId>
   <artifactId>car-data-spark-stream-maprdb</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <version>1.4-SNAPSHOT</version>
   <name>car-data-spark-stream-maprdb</name>
 
 

@@ -1,17 +1,22 @@
 package com.mpojeda84.mapr.scala
 
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.spark.streaming.dstream.DStream
-import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, LocationStrategies}
-import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import org.apache.spark.{SparkConf, SparkContext}
-import org.ojai.joda.DateTime;
-import com.mapr.db.spark.streaming._
-import com.mapr.db.spark._
-import com.mapr.db.spark.dbclient.DBClient
-import com.mapr.db.spark.utils.LoggingTrait
-import com.mapr.db.spark.writers.OJAIValue
 
+//import com.mapr.db.spark._
+//import org.apache.spark.sql.functions.{col, lit}
+//import org.apache.spark.storage.StorageLevel
+//import org.apache.spark.sql.SparkSession
+//import org.apache.spark.sql._
+//import com.mapr.db.spark.sql._
+
+import org.ojai.joda.DateTime
+import com.mapr.db.spark._
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.spark.streaming.{Milliseconds, StreamingContext}
+import com.mapr.db.spark.sql._
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 
 object Application {
 
@@ -19,26 +24,51 @@ object Application {
 
     val argsConfiguration = Configuration.parse(args)
 
-    val config = new SparkConf().setAppName("Car Instant Data Ingestion")
-
-    val sc = new SparkContext(config)
-    implicit val ssc: StreamingContext = new StreamingContext(sc, Milliseconds(500))
+    val spark = SparkSession.builder.appName("Car Data Transformation").getOrCreate
+    implicit val ssc: StreamingContext = new StreamingContext(spark.sparkContext, Milliseconds(500))
 
     println("### RUNNING ###")
     println(argsConfiguration.tableName)
     println(argsConfiguration.topic)
+
 
     val consumerStrategy = ConsumerStrategies.Subscribe[String, String](List(argsConfiguration.topic), kafkaParameters)
     val directStream = KafkaUtils.createDirectStream(ssc, LocationStrategies.PreferConsistent, consumerStrategy)
 
       directStream.map(_.value())
       .map(toJsonWithId)
-      .foreachRDD { rdd =>
+      .foreachRDD { rdd => {
         rdd.saveToMapRDB(argsConfiguration.tableName)
-      }
+        if(rdd.count() > 0)
+          updateTransformed(spark, argsConfiguration.tableName, argsConfiguration.transformed, argsConfiguration.community)
+      }}
 
     ssc.start()
     ssc.awaitTermination()
+
+  }
+
+  private def updateTransformed(spark: SparkSession, raw: String, transformed: String, community: String) : Unit = {
+
+    val df = spark.loadFromMapRDB(raw)
+
+    df.persist(StorageLevel.MEMORY_ONLY)
+
+    df.createOrReplaceTempView("raw_data")
+
+    val ndf_vinmakeyear = spark.sql("SELECT VIN AS `vin`, Make AS `make`, `Year` AS `year` FROM raw_data GROUP BY vin, make, year")
+    val highestSpeedToday = spark.sql("SELECT DISTINCT `VIN` AS `vin`, max(cast(`speed` AS Double)) AS `highestSpeedToday` FROM raw_data GROUP BY `VIN`, CAST(`hrtimestamp` AS DATE)")
+    val highestSpeedThisWeek = spark.sql("SELECT `VIN` AS `vin`, max(cast(`speed` AS Double)) AS `highestSpeedThisWeek` FROM raw_data GROUP BY `vin`")
+    val avgSpeed = spark.sql("SELECT `VIN` AS `vin`, avg(cast(`speed` AS Double)) AS `avgSpeed` FROM raw_data GROUP BY `vin`")
+    val highestFuelEconomy = spark.sql("SELECT DISTINCT `VIN` AS `vin`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy` FROM raw_data GROUP BY `VIN`")
+    val totalFuelEconomy = spark.sql("SELECT DISTINCT `VIN` AS `vin`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY `VIN`")
+
+
+    val df2 = ndf_vinmakeyear.join(highestSpeedToday, "vin").join(highestSpeedThisWeek, "vin").join(avgSpeed, "vin").join(highestFuelEconomy, "vin").join(totalFuelEconomy, "vin")
+    df2.withColumn("_id", col("vin")).saveToMapRDB(transformed)
+
+    val  commAvgSpeed = spark.sql("SELECT avg(`speed`) AS `avgCommunitySpeed` FROM raw_data")
+    commAvgSpeed.withColumn("_id", lit("speed")).saveToMapRDB(community)
 
   }
 
