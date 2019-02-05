@@ -1,6 +1,5 @@
 package com.mpojeda84.mapr.scala
 
-
 //import com.mapr.db.spark._
 //import org.apache.spark.sql.functions.{col, lit}
 //import org.apache.spark.storage.StorageLevel
@@ -13,73 +12,43 @@ import com.mapr.db.spark._
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import com.mapr.db.spark.sql._
+import com.mapr.db.spark.streaming.MapRDBSourceConfig
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 
+
 object Application {
 
   def main (args: Array[String]): Unit = {
 
-    val argsConfiguration = Configuration.parse(args)
+    //val argsConfiguration = Configuration.parse(args)
 
     val spark = SparkSession.builder.appName("Car Data Transformation").getOrCreate
-    implicit val ssc: StreamingContext = new StreamingContext(spark.sparkContext, Milliseconds(500))
 
-    println("### RUNNING ###")
-    println(argsConfiguration.tableName)
-    println(argsConfiguration.topic)
+    import spark.implicits._
 
+    val stream = spark.readStream.format("kafka").option("failOnDataLoss", false).option("kafka.bootstrap.servers", "").option("subscribe", "/user/mapr/car-stream:obd_msg").option("startingOffsets", "earliest").load()
 
-    val consumerStrategy = ConsumerStrategies.Subscribe[String, String](List(argsConfiguration.topic), kafkaParameters)
-    val directStream = KafkaUtils.createDirectStream(ssc, LocationStrategies.PreferConsistent, consumerStrategy)
+    val documents = stream.select("value").as[String].map(toJsonWithId)
 
-      directStream.map(_.value())
-      .map(toJsonWithId)
-      .foreachRDD { rdd => {
-        rdd.saveToMapRDB(argsConfiguration.tableName)
-        if(rdd.count() > 0)
-          updateTransformed(spark, argsConfiguration.tableName, argsConfiguration.transformed, argsConfiguration.community)
-      }}
+    documents.createOrReplaceTempView("raw_data")
 
-    ssc.start()
-    ssc.awaitTermination()
+    val all = spark.sql("SELECT VIN AS `vin`, first(make) AS `make`, first(`year`) AS `year`, avg(cast(`speed` AS Double)) AS `avgSpeed`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY vin")
 
-  }
+    val query = all.writeStream
+      .format(MapRDBSourceConfig.Format)
+      .option(MapRDBSourceConfig.TablePathOption, "/user/mapr/car-table-direct-3")
+      .option(MapRDBSourceConfig.CreateTableOption, false)
+      .option(MapRDBSourceConfig.IdFieldPathOption, "vin")
+      .option("checkpointLocation", "/user/mapr/temp")
+      .outputMode("complete")
+      .start()
 
-  private def updateTransformed(spark: SparkSession, raw: String, transformed: String, community: String) : Unit = {
-
-    val df = spark.loadFromMapRDB(raw)
-
-    df.persist(StorageLevel.MEMORY_ONLY)
-
-    df.createOrReplaceTempView("raw_data")
-
-    val ndf_vinmakeyear = spark.sql("SELECT VIN AS `vin`, Make AS `make`, `Year` AS `year` FROM raw_data GROUP BY vin, make, year")
-    val highestSpeedToday = spark.sql("SELECT DISTINCT `VIN` AS `vin`, max(cast(`speed` AS Double)) AS `highestSpeedToday` FROM raw_data GROUP BY `VIN`, CAST(`hrtimestamp` AS DATE)")
-    val highestSpeedThisWeek = spark.sql("SELECT `VIN` AS `vin`, max(cast(`speed` AS Double)) AS `highestSpeedThisWeek` FROM raw_data GROUP BY `vin`")
-    val avgSpeed = spark.sql("SELECT `VIN` AS `vin`, avg(cast(`speed` AS Double)) AS `avgSpeed` FROM raw_data GROUP BY `vin`")
-    val highestFuelEconomy = spark.sql("SELECT DISTINCT `VIN` AS `vin`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy` FROM raw_data GROUP BY `VIN`")
-    val totalFuelEconomy = spark.sql("SELECT DISTINCT `VIN` AS `vin`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY `VIN`")
-
-
-    val df2 = ndf_vinmakeyear.join(highestSpeedToday, "vin").join(highestSpeedThisWeek, "vin").join(avgSpeed, "vin").join(highestFuelEconomy, "vin").join(totalFuelEconomy, "vin")
-    df2.withColumn("_id", col("vin")).saveToMapRDB(transformed)
-
-    val  commAvgSpeed = spark.sql("SELECT avg(`speed`) AS `avgCommunitySpeed` FROM raw_data")
-    commAvgSpeed.withColumn("_id", lit("speed")).saveToMapRDB(community)
+    query.awaitTermination()
 
   }
-
-
-  private def kafkaParameters = Map(
-    ConsumerConfig.GROUP_ID_CONFIG -> ("connected-car" + DateTime.now().toString),
-    ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
-    ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
-    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG -> "true",
-    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> "earliest"
-  )
 
   private def toJsonWithId(csvLine: String): CarDataInstant = {
     val values = csvLine.split(",").map(_.trim)
