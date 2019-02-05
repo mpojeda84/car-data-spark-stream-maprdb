@@ -1,22 +1,11 @@
 package com.mpojeda84.mapr.scala
 
-//import com.mapr.db.spark._
-//import org.apache.spark.sql.functions.{col, lit}
-//import org.apache.spark.storage.StorageLevel
-//import org.apache.spark.sql.SparkSession
-//import org.apache.spark.sql._
-//import com.mapr.db.spark.sql._
-
-import org.ojai.joda.DateTime
-import com.mapr.db.spark._
 import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import com.mapr.db.spark.sql._
-import com.mapr.db.spark.streaming.MapRDBSourceConfig
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, LocationStrategies}
+import org.apache.spark.streaming.{Milliseconds, StreamingContext}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.ojai.joda.DateTime;
+import com.mapr.db.spark._
 
 
 object Application {
@@ -25,55 +14,36 @@ object Application {
 
     val argsConfiguration = Configuration.parse(args)
 
-    val spark = SparkSession.builder.appName("Car Data Transformation").getOrCreate
+    val config = new SparkConf().setAppName("Car data raw ingestion")
 
-    import spark.implicits._
+    val sc = new SparkContext(config)
+    implicit val ssc: StreamingContext = new StreamingContext(sc, Milliseconds(500))
 
-    val stream = spark.readStream
-      .format("kafka")
-      .option("failOnDataLoss", false)
-      .option("kafka.bootstrap.servers", "none")
-      .option("subscribe", argsConfiguration.topic)
-      .option("startingOffsets", "earliest")
-      .load()
+    println("### RUNNING ###")
+    println(argsConfiguration.tableName)
+    println(argsConfiguration.topic)
 
-    val documents = stream.select("value").as[String].map(toJsonWithId)
-    documents.createOrReplaceTempView("raw_data")
+    val consumerStrategy = ConsumerStrategies.Subscribe[String, String](List(argsConfiguration.topic), kafkaParameters)
+    val directStream = KafkaUtils.createDirectStream(ssc, LocationStrategies.PreferConsistent, consumerStrategy)
 
-    saveTransformed(spark,argsConfiguration)
-    //saveRaw(spark,argsConfiguration)
+    directStream.map(_.value())
+      .map(toJsonWithId)
+      .foreachRDD { rdd =>
+        rdd.saveToMapRDB(argsConfiguration.tableName)
+      }
+
+    ssc.start()
+    ssc.awaitTermination()
 
   }
 
-  private def saveTransformed(spark: SparkSession, argsConfiguration: Configuration): Unit = {
-    val processed = spark.sql("SELECT VIN AS `vin`, first(make) AS `make`, first(`year`) AS `year`, avg(cast(`speed` AS Double)) AS `avgSpeed`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY vin")
-
-    val query = processed.writeStream
-      .format(MapRDBSourceConfig.Format)
-      .option(MapRDBSourceConfig.TablePathOption, argsConfiguration.transformed)
-      .option(MapRDBSourceConfig.CreateTableOption, false)
-      .option(MapRDBSourceConfig.IdFieldPathOption, "vin")
-      .option("checkpointLocation", "/user/mapr/temp")
-      .outputMode("complete")
-      .start()
-
-    query.awaitTermination()
-  }
-
-  private def saveRaw(spark: SparkSession, argsConfiguration: Configuration): Unit = {
-    val processed = spark.sql("SELECT * FROM raw_data")
-
-    val query = processed.writeStream
-      .format(MapRDBSourceConfig.Format)
-      .option(MapRDBSourceConfig.TablePathOption, argsConfiguration.tableName)
-      .option(MapRDBSourceConfig.CreateTableOption, false)
-      .option("checkpointLocation", "/user/mapr/temp")
-      .outputMode("complete")
-      .start()
-
-    query.awaitTermination()
-  }
-
+  private def kafkaParameters = Map(
+    ConsumerConfig.GROUP_ID_CONFIG -> ("connected-car" + DateTime.now().toString),
+    ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
+    ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG -> "org.apache.kafka.common.serialization.StringDeserializer",
+    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG -> "true",
+    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> "earliest"
+  )
 
   private def toJsonWithId(csvLine: String): CarDataInstant = {
     val values = csvLine.split(",").map(_.trim)
