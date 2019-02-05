@@ -23,23 +23,34 @@ object Application {
 
   def main (args: Array[String]): Unit = {
 
-    //val argsConfiguration = Configuration.parse(args)
+    val argsConfiguration = Configuration.parse(args)
 
     val spark = SparkSession.builder.appName("Car Data Transformation").getOrCreate
 
     import spark.implicits._
 
-    val stream = spark.readStream.format("kafka").option("failOnDataLoss", false).option("kafka.bootstrap.servers", "").option("subscribe", "/user/mapr/car-stream:obd_msg").option("startingOffsets", "earliest").load()
+    val stream = spark.readStream
+      .format("kafka")
+      .option("failOnDataLoss", false)
+      .option("kafka.bootstrap.servers", "none")
+      .option("subscribe", argsConfiguration.topic)
+      .option("startingOffsets", "earliest")
+      .load()
 
     val documents = stream.select("value").as[String].map(toJsonWithId)
-
     documents.createOrReplaceTempView("raw_data")
 
-    val all = spark.sql("SELECT VIN AS `vin`, first(make) AS `make`, first(`year`) AS `year`, avg(cast(`speed` AS Double)) AS `avgSpeed`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY vin")
+    saveTransformed(spark,argsConfiguration)
+    //saveRaw(spark,argsConfiguration)
 
-    val query = all.writeStream
+  }
+
+  private def saveTransformed(spark: SparkSession, argsConfiguration: Configuration): Unit = {
+    val processed = spark.sql("SELECT VIN AS `vin`, first(make) AS `make`, first(`year`) AS `year`, avg(cast(`speed` AS Double)) AS `avgSpeed`, max(cast(`instantFuelEconomy` AS Double)) AS `bestFuelEconomy`, avg(cast(`instantFuelEconomy` AS Double)) AS `totalFuelEconomy` FROM raw_data GROUP BY vin")
+
+    val query = processed.writeStream
       .format(MapRDBSourceConfig.Format)
-      .option(MapRDBSourceConfig.TablePathOption, "/user/mapr/car-table-direct-3")
+      .option(MapRDBSourceConfig.TablePathOption, argsConfiguration.transformed)
       .option(MapRDBSourceConfig.CreateTableOption, false)
       .option(MapRDBSourceConfig.IdFieldPathOption, "vin")
       .option("checkpointLocation", "/user/mapr/temp")
@@ -47,8 +58,22 @@ object Application {
       .start()
 
     query.awaitTermination()
-
   }
+
+  private def saveRaw(spark: SparkSession, argsConfiguration: Configuration): Unit = {
+    val processed = spark.sql("SELECT * FROM raw_data")
+
+    val query = processed.writeStream
+      .format(MapRDBSourceConfig.Format)
+      .option(MapRDBSourceConfig.TablePathOption, argsConfiguration.tableName)
+      .option(MapRDBSourceConfig.CreateTableOption, false)
+      .option("checkpointLocation", "/user/mapr/temp")
+      .outputMode("complete")
+      .start()
+
+    query.awaitTermination()
+  }
+
 
   private def toJsonWithId(csvLine: String): CarDataInstant = {
     val values = csvLine.split(",").map(_.trim)
