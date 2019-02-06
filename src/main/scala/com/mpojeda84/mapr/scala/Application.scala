@@ -50,11 +50,10 @@ object Application {
   private def toJsonWithId(csvLine: String): CarDataInstant = {
     val values = csvLine.split(",").map(_.trim)
 
-    val id = values(0) + values(4) + values(5);
+    val id = values(1) + values(5) + values(6);
 
     CarDataInstant(
       id,
-      values(0),
       values(1),
       values(2),
       values(3),
@@ -70,7 +69,10 @@ object Application {
       values(13),
       values(14),
       values(15),
-      values(16)
+      values(16),
+      values(17),
+      values(18),
+      values(19)
     )
 
   }

@@ -19,5 +19,7 @@ case class CarDataInstant(
                            altitude: String,
                            throttle: String,
                            timeSinceEngineStart: String,
-                           ambientAirTemperature: String
+                           ambientAirTemperature: String,
+                           odometer: String,
+                           target: String
                          )
