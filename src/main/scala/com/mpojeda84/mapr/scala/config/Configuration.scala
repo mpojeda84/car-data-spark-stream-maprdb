@@ -1,4 +1,4 @@
-package com.mpojeda84.mapr.scala;
+package com.mpojeda84.mapr.scala.config
 
 case class Configuration(tableName: String, topic: String, transformed: String, community: String)
 

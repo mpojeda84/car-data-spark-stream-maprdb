@@ -1,11 +1,10 @@
-package com.mpojeda84.mapr.scala
+package com.mpojeda84.mapr.scala.model
 
 case class CarDataInstant(
                            _id: String,
 
                            vin: String,
-                           make: String
-                           ,
+                           make: String,
                            year: String,
                            nhrTimeStamp: String,
                            hrTimeStamp: String,

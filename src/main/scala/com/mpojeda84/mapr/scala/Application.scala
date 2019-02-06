@@ -4,8 +4,10 @@ import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.spark.streaming.kafka09.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.apache.spark.{SparkConf, SparkContext}
-import org.ojai.joda.DateTime;
+import org.ojai.joda.DateTime
 import com.mapr.db.spark._
+import com.mpojeda84.mapr.scala.config.Configuration
+import com.mpojeda84.mapr.scala.model.CarDataInstant
 
 
 object Application {
